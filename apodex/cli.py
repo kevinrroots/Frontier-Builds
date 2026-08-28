@@ -216,6 +216,25 @@ def publish_model_overrides(
         env["OPENAI_MAX_TOKENS"] = str(cfg.max_tokens)
 
 
+def publish_turn_override(
+    max_turns: int,
+    *,
+    environ: MutableMapping[str, str] | None = None,
+) -> None:
+    """Publish the resolved CLI turn budget for native workflow profiles.
+
+    ``TerminalSession.max_turns`` controls the terminal wrapper, while the
+    ReAct and agent-team workflows independently interpolate
+    ``MAIN_MAX_TURNS`` from their YAML profiles. Publishing the resolved value
+    keeps ``--max-turns`` authoritative at both layers.
+    """
+    if max_turns < 1:
+        raise ValueError("max_turns must be at least 1")
+
+    env = os.environ if environ is None else environ
+    env["MAIN_MAX_TURNS"] = str(max_turns)
+
+
 def _init_readline() -> None:
     """Enable arrow-key history + emacs line editing for the REPL ``input()``,
     persisting history to ``~/.apodex_history``. Best-effort:
@@ -499,10 +518,16 @@ async def _amain(argv: list[str] | None = None) -> int:
             str(resumed_state.get("model") or "") if resumed_state is not None else None
         ),
     )
-    # Must precede TerminalSession: the workflow profile is rendered from the
-    # environment when a task runs, not from cfg.
+    max_turns = (
+        args.max_turns
+        if args.max_turns is not None
+        else (profile.max_turns or 50)
+    )
+
+    # Must precede TerminalSession: native workflow profiles are rendered from
+    # environment variables when a task runs, not from these CLI objects.
     publish_model_overrides(cfg)
-    max_turns = args.max_turns if args.max_turns is not None else (profile.max_turns or 50)
+    publish_turn_override(max_turns)
 
     # Purely local BYOK validation. This must remain before TerminalSession/TUI
     # construction so a missing key or malformed endpoint fails cleanly rather
