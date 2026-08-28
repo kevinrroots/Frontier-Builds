@@ -10,6 +10,36 @@ from apodex.sandbox import BWRAP, CONTAINER, NATIVE, Strategy, resolve_strategy
 from plugins.tools._sandbox import resolve_runtime_path
 
 
+def test_docker_forwards_explicit_model_runtime_without_values_in_argv() -> None:
+    environ = {
+        "OPENAI_API_KEY": "secret-value",
+        "OPENAI_BASE_URL": "http://127.0.0.1:30000/v1",
+        "OPENAI_MODEL": "qwen38-27b-nvfp4-gguf-ar",
+        "UNRELATED": "not-forwarded",
+    }
+
+    args = docker.model_runtime_env(environ)
+
+    assert args == [
+        "-e", "OPENAI_API_KEY",
+        "-e", "OPENAI_BASE_URL",
+        "-e", "OPENAI_MODEL",
+    ]
+    assert "secret-value" not in args
+    assert "UNRELATED" not in args
+
+
+def test_linux_docker_shares_host_network_only_for_loopback_model() -> None:
+    local = {"OPENAI_BASE_URL": "http://127.0.0.1:30000/v1"}
+    remote = {"OPENAI_BASE_URL": "https://models.example.test/v1"}
+
+    assert docker.workstation_network_args(local, platform="linux") == [
+        "--network", "host",
+    ]
+    assert docker.workstation_network_args(remote, platform="linux") == []
+    assert docker.workstation_network_args(local, platform="darwin") == []
+
+
 def test_native_runtime_keeps_mutable_state_under_workspace(tmp_path) -> None:
     workspace = tmp_path / "project"
     workspace.mkdir()

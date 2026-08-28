@@ -30,6 +30,14 @@ from pathlib import Path
 _DEFAULT_IMAGE = "apodex:local"
 IMAGE = os.environ.get("APODEX_IMAGE", _DEFAULT_IMAGE)
 _REPO_ROOT = Path(__file__).resolve().parents[1]
+_MODEL_RUNTIME_ENV = (
+    "OPENAI_PROVIDER",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_MODEL",
+    "OPENAI_CONTEXT_WINDOW",
+    "OPENAI_MAX_TOKENS",
+)
 
 
 def terminal_env(environ: Mapping[str, str]) -> list[str]:
@@ -59,6 +67,32 @@ def terminal_env(environ: Mapping[str, str]) -> list[str]:
     elif not term.endswith(("-256color", "-truecolor", "-direct")):
         args += ["-e", "COLORTERM=truecolor"]
     return args
+
+
+def model_runtime_env(environ: Mapping[str, str]) -> list[str]:
+    """Forward an explicitly selected model runtime without exposing values in argv."""
+    args: list[str] = []
+    for name in _MODEL_RUNTIME_ENV:
+        if name in environ:
+            args.extend(["-e", name])
+    return args
+
+
+def workstation_network_args(
+    environ: Mapping[str, str], *, platform: str | None = None,
+) -> list[str]:
+    """Keep a Linux container's loopback endpoint bound to the host loopback."""
+    active_platform = platform or sys.platform
+    endpoint = environ.get("OPENAI_BASE_URL", "").strip().lower()
+    loopback = endpoint.startswith((
+        "http://127.0.0.1:",
+        "https://127.0.0.1:",
+        "http://localhost:",
+        "https://localhost:",
+        "http://[::1]:",
+        "https://[::1]:",
+    ))
+    return ["--network", "host"] if active_platform.startswith("linux") and loopback else []
 
 
 def _host_identity_env() -> list[str]:
@@ -237,6 +271,7 @@ def run_in_container(
             )
     docker_cmd = [
         "docker", "run", "--rm",
+        *workstation_network_args(os.environ),
         # Enter through the image entrypoint with ``apodex`` as its command,
         # rather than replacing it with ``apodex``. The entrypoint is what
         # remaps the unprivileged tool account onto APODEX_HOST_UID/GID below
@@ -302,6 +337,9 @@ def run_in_container(
     env_file = _REPO_ROOT / ".env"
     if env_file.is_file():
         docker_cmd += ["--env-file", str(env_file)]
+    # Explicit launcher values win over repository defaults. Passing only each
+    # variable name keeps credential values out of the process argument list.
+    docker_cmd += model_runtime_env(os.environ)
     docker_cmd += [image, "apodex", *_without_cwd_arg(argv)]
 
     try:
