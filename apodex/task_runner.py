@@ -63,11 +63,11 @@ _COMPLETE_TOP_LEVEL_STOPS = frozenset({
     "", "completed", "final_answer", "submit_report", "workflow_complete",
 })
 # ``no_tool`` means opposite things on the two paths that reach here, so it is
-# never in the shared set above. The generic coding loop runs with
-# ``no_tool_behavior="stop"``: a turn without tool calls IS how it answers.
-# Workflows run with ``no_tool_behavior="nudge"``, so the same reason means the
-# nudge budget ran out mid-task — which ``agent_bus.fan_in`` also classifies as
-# INCOMPLETE ("agent stopped without producing a final answer").
+# not in the shared set above. The generic coding loop uses a tool-free turn as
+# its normal answer. Workflows normally use ``no_tool_behavior="nudge"``, where
+# an unqualified ``no_tool`` can mean the nudge budget expired. A workflow may,
+# however, explicitly classify its agent-authored tool-free answer as complete;
+# that stronger return contract is handled by :func:`_is_complete_run`.
 _NO_TOOL_STOP = "no_tool"
 
 # These stops can leave a non-empty ``final_content`` that is known to be
@@ -93,9 +93,33 @@ def _is_complete_run(
     # phase hit its soft deadline. Its explicit complete status is authoritative.
     if answer_status == "complete" and answer_source == "reporter_llm":
         return True
+    # Stateful ReAct normally finishes with a plain-text turn after its last
+    # tool result. The workflow marks that agent-authored answer complete, so
+    # distinguish it from a bare ``no_tool`` caused by exhausted nudges.
+    if (
+        stopped_by == _NO_TOOL_STOP
+        and answer_status == "complete"
+        and answer_source == "agent"
+    ):
+        return True
     if no_tool_is_complete and stopped_by == _NO_TOOL_STOP:
         return True
     return stopped_by in _COMPLETE_TOP_LEVEL_STOPS
+
+
+def _native_workflow_counts(state: dict[str, Any]) -> tuple[int, int]:
+    """Use authoritative loop counters, with compatibility fallbacks."""
+    steps = state.get("react_steps") or []
+    turns = state.get("turns_used")
+    tool_calls = state.get("tool_calls_count")
+
+    turn_count = turns if type(turns) is int and turns >= 0 else len(steps)
+    tool_count = (
+        tool_calls
+        if type(tool_calls) is int and tool_calls >= 0
+        else 0
+    )
+    return turn_count, tool_count
 
 
 def _clip(text: str, limit: int = _PARTIAL_OUTPUT_LIMIT) -> str:
@@ -572,6 +596,7 @@ class TaskRunnerMixin:
                 # so, or the lines the user typed vanish without a trace.
                 self.r.note("■ queued input discarded — fix the LLM error and retype it")
             return
+        turns, tool_calls = _native_workflow_counts(state)
         complete = _is_complete_run(
             stopped_by,
             answer_status=str(state.get("answer_status") or ""),
@@ -580,15 +605,15 @@ class TaskRunnerMixin:
         if complete:
             self.r.final(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns,
+                tool_calls=tool_calls,
                 stopped_by=stopped_by,
             )
         else:
             self._show_incomplete_run(
                 final,
-                turns=len(state.get("react_steps") or []),
-                tool_calls=0,
+                turns=turns,
+                tool_calls=tool_calls,
                 stopped_by=stopped_by,
             )
         await self._render_changed_files()
