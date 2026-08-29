@@ -105,6 +105,15 @@ def _clip(text: str, limit: int = _PARTIAL_OUTPUT_LIMIT) -> str:
     return text[:limit].rstrip() + "\n… (truncated; the full text is in the log)"
 
 
+def _native_workflow_profile_overrides(max_turns: int) -> dict[str, Any]:
+    """Carry the terminal's explicit turn budget into the workflow profile."""
+    return {
+        "agent": {
+            "main_max_turns": int(max_turns),
+        },
+    }
+
+
 class TaskRunnerMixin:
     # This mixin is designed to be combined with TerminalSession.
     # It assumes the presence of standard TerminalSession attributes.
@@ -460,6 +469,9 @@ class TaskRunnerMixin:
         usage_observer = UsageObserver(self.usage)
         metadata = {
             "profile": workflow_profile,
+            "profile_overrides": _native_workflow_profile_overrides(
+                self.max_turns,
+            ),
             "coding_workspace_root": self.cwd,
             "sdk_extra_observers": [observer, usage_observer, self.tracer],
             # Stable across workflow executions; ``turn_index`` advances

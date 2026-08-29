@@ -407,6 +407,23 @@ def _resolve_worktree_root(state: dict[str, Any], task_id: str) -> Path:
     return Path("logs") / "stateful_react" / task_id / "worktree"
 
 
+def _direct_worktree_root(
+    state: dict[str, Any],
+    task_id: str,
+    default_workspace: str,
+) -> Path:
+    """Select the real coding project when the terminal supplied one.
+
+    Container/native workflows normally use their run-private workspace.
+    A terminal coding session explicitly supplies ``coding_workspace_root``;
+    honoring it keeps all file tools on the same project filesystem.
+    """
+    metadata = state.get("metadata") or {}
+    if metadata.get("coding_workspace_root"):
+        return _resolve_worktree_root(state, task_id)
+    return Path(default_workspace)
+
+
 def _resolve_sandbox_binds(
     state: dict[str, Any],
     worktree_root: Path,
@@ -840,7 +857,9 @@ async def react_agent_node(state: dict[str, Any], ctx: NodeContext) -> dict[str,
     inputs_dir = ""
     if sandbox_mode in ("container", "native"):
         workspace_dir, outputs_dir_str, inputs_dir = resolve_mount_dirs()
-        worktree_root = Path(workspace_dir)
+        worktree_root = _direct_worktree_root(
+            state, ctx.task_id, workspace_dir,
+        )
         outputs_dir = Path(outputs_dir_str)
         workspace_root_str = str(worktree_root)
     else:
