@@ -928,6 +928,9 @@ def test_list_saved_sessions_returns_newest_checkpoint_metadata(tmp_path, monkey
     from apodex.session import list_saved_sessions
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("APODEX_RUNS_ROOT", raising=False)
+    monkeypatch.delenv("APODEX_RUNS_ROOT_PINNED", raising=False)
+    monkeypatch.chdir(tmp_path)
     session_dir = tmp_path / ".apodex" / "sessions"
     session_dir.mkdir(parents=True)
     older = session_dir / "older.json"
