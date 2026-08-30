@@ -22,7 +22,7 @@ agent:
   tool_timeout_s: 900
   llm_timeout_s: 600
   reasoning_only_timeout_s: 120
-  reasoning_only_max_tokens: 16384
+  reasoning_only_max_tokens: 4096
   logical_call_timeout_s: 900
   thinking_in_history: true
   keep_last_k: 5

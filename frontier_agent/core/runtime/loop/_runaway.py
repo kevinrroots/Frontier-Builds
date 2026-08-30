@@ -70,10 +70,11 @@ def _env_float(name: str, default: float) -> float:
 # Deploy-tunable: on one measured logic-puzzle workload the reduced-cap
 # resample never recovered, so those deploys set
 # FRONTIER_AGENT_RUNAWAY_MAX_RETRIES=1 to save 150-400s per persisted
-# runaway. Default stays 2 (other workloads do recover on
-# the reduced-cap retry). Read once at import; this is a deployment
+# runaway. The workstation-safe default is one reduced-cap retry: repeated
+# resampling without tool or visible progress must stop instead of monopolizing
+# an interactive workstation. Read once at import; this remains a deployment
 # knob, not a per-call one.
-_RUNAWAY_MAX_RETRIES = _env_int("FRONTIER_AGENT_RUNAWAY_MAX_RETRIES", 2)
+_RUNAWAY_MAX_RETRIES = _env_int("FRONTIER_AGENT_RUNAWAY_MAX_RETRIES", 1)
 _RUNAWAY_BACKOFF_S = 2.0
 # Key under which the agent loop threads cross-turn runaway state
 # (a mutable dict) through its metadata into ``call_llm``. Contents:

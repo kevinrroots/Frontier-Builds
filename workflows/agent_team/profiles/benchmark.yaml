@@ -67,7 +67,7 @@ agent:
   # 120). Raise concurrency and the two keys stop meaning the same thing; the
   # token cap is the one to trust.
   reasoning_only_timeout_s: 120
-  reasoning_only_max_tokens: 16384
+  reasoning_only_max_tokens: 4096
   logical_call_timeout_s: 900
   # Preserve model reasoning in subsequent requests when the endpoint supports it.
   thinking_in_history: true

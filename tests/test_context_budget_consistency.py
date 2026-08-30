@@ -38,13 +38,13 @@ def _check(**kw: object) -> list[str]:
 
 
 def test_the_shipped_combination_is_consistent() -> None:
-    """max_len 262144 / max_input 229376 / max_tokens 32768 / watchdog 16384 —
+    """max_len 262144 / max_input 229376 / max_tokens 32768 / watchdog 4096 —
     the defaults, which fit a `--context-length 262144` server exactly."""
     assert _check(
         max_len=262_144,
         max_input_tokens=229_376,
         max_tokens=32_768,
-        reasoning_only_max_tokens=16_384,
+        reasoning_only_max_tokens=4_096,
     ) == []
 
 

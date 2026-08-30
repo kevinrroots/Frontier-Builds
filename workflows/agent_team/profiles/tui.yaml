@@ -54,7 +54,7 @@ agent:
   # 120). Raise concurrency and the two keys stop meaning the same thing; the
   # token cap is the one to trust.
   reasoning_only_timeout_s: 120
-  reasoning_only_max_tokens: 16384
+  reasoning_only_max_tokens: 4096
   logical_call_timeout_s: 900
   wall_deadline_reserve_s: ${REPORT_WALL_TIME:-1800}
   reporter_wall_time_s: 900

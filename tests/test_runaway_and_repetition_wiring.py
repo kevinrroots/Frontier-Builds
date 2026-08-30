@@ -32,7 +32,7 @@ from workflows.stateful_react_agent.profile import load_react_profile
 
 _GUARDRAILS = {
     "reasoning_only_timeout_s": 120,
-    "reasoning_only_max_tokens": 16384,
+    "reasoning_only_max_tokens": 4096,
     "logical_call_timeout_s": 900,
 }
 
@@ -88,7 +88,7 @@ def test_stateful_resolver_maps_the_profile_onto_loop_config() -> None:
     )
 
     assert config.reasoning_only_timeout_s == 120
-    assert config.reasoning_only_max_tokens == 16384
+    assert config.reasoning_only_max_tokens == 4096
     assert config.logical_call_timeout_s == 900
 
 
