@@ -417,10 +417,14 @@ def _direct_worktree_root(
     Container/native workflows normally use their run-private workspace.
     A terminal coding session explicitly supplies ``coding_workspace_root``;
     honoring it keeps all file tools on the same project filesystem.
+    The explicit root must be returned directly: the general resolver gives a
+    Harbor ``_trial_dir`` higher priority, but HF sessions use that directory
+    only for private state and trajectories, never as their authorized workspace.
     """
     metadata = state.get("metadata") or {}
-    if metadata.get("coding_workspace_root"):
-        return _resolve_worktree_root(state, task_id)
+    coding_root = str(metadata.get("coding_workspace_root") or "").strip()
+    if coding_root:
+        return Path(coding_root)
     return Path(default_workspace)
 
 
