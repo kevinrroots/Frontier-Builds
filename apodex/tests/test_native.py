@@ -4,6 +4,8 @@ import asyncio
 import os
 from pathlib import Path
 
+import pytest
+
 from apodex import cli, docker
 from apodex.native import prepare_native_runtime
 from apodex.sandbox import BWRAP, CONTAINER, NATIVE, Strategy, resolve_strategy
@@ -286,15 +288,18 @@ def test_linux_uses_native_runtime_by_default(
     assert "native mode" in capsys.readouterr().err
 
 
+@pytest.fixture(autouse=True)
+def _isolate_process_sandbox_state(monkeypatch) -> None:
+    """Keep process-wide CLI sandbox selection from leaking between tests."""
+    import apodex.sandbox as sandbox_state
+
+    monkeypatch.setattr(sandbox_state, "_active", None)
+    monkeypatch.setenv("SANDBOX_BACKEND", "auto")
+
+
 def test_linux_bwrap_is_explicit_and_skips_native_runtime(
     tmp_path, monkeypatch,
 ) -> None:
-    # Restore process-wide sandbox state after this in-process CLI test.
-    import apodex.sandbox as sandbox_state
-
-    monkeypatch.setattr(sandbox_state, "_active", sandbox_state._active)
-    monkeypatch.setenv("SANDBOX_BACKEND", "auto")
-
     prepared: list[tuple[str, str]] = []
     requested: list[str | None] = []
     monkeypatch.chdir(tmp_path)
