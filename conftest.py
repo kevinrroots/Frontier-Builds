@@ -35,4 +35,3 @@ def _restore_process_runtime_state_after_each_test() -> Iterator[None]:
         strategy_state._active = active
         shared_state._sandbox = shared
         shared_state._sandbox_identity = shared_identity
-
