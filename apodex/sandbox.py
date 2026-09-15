@@ -207,6 +207,13 @@ def active_strategy() -> Strategy:
 def set_active_strategy(strategy: Strategy) -> None:
     global _active
     _active = strategy
+    # Keep the shared file-tool layer on the same trusted boundary selected by
+    # the CLI. ``--bwrap`` previously updated only this module's shell runner,
+    # leaving plugins.tools._sandbox on its cached/default ``auto`` backend.
+    # The two layers then created unrelated jails and /outputs writes landed in
+    # a private ephemeral namespace despite reporting success.
+    if strategy.name in (BWRAP, CONTAINER, NATIVE):
+        os.environ[_BACKEND_ENV] = strategy.name
 
 
 # ── execution ────────────────────────────────────────────────────────────

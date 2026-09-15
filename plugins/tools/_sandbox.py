@@ -45,6 +45,7 @@ from plugins.tools._path_auth import _path_within
 logger = logging.getLogger(__name__)
 
 _sandbox = None  # E2B Sandbox | BwrapSandbox | task override | None
+_sandbox_identity: tuple[Any, ...] | None = None
 # Serializes shared-singleton creation. Without it, a burst of concurrent
 # sub-agents all see ``_sandbox is None``, each call ``Sandbox.create()``, and
 # overwrite the global — spinning up (and leaking) N sandboxes instead of one.
@@ -2689,6 +2690,8 @@ def _create_provisioned_sandbox(
     api_key: str = "",
     template: str = "base",
     timeout: int = 1800,
+    workspace: str | Path | None = None,
+    binds: tuple[tuple[str, str, bool], ...] = (),
 ) -> Any:
     """Create and provision a fresh isolated sandbox (E2B or bubblewrap).
 
@@ -2732,7 +2735,11 @@ def _create_provisioned_sandbox(
         # This is generic model code, not the large-document file sandbox.
         # Keep the tighter local limit so an E2B outage cannot become a worker
         # OOM incident during fallback.
-        sandbox = BwrapSandbox(mem_limit_mb=_local_mem_limit_mb())
+        sandbox = BwrapSandbox(
+            workspace=workspace,
+            binds=binds,
+            mem_limit_mb=_local_mem_limit_mb(),
+        )
         probe = sandbox.commands.run("true", timeout=10)
         if probe.exit_code != 0:
             sandbox.kill()
@@ -2804,11 +2811,45 @@ def _resolve_use_e2b() -> tuple[bool, str, str, int]:
     return use_e2b, api_key, template, timeout
 
 
-def _live_shared_sandbox() -> Any:
+def _bwrap_mount_config() -> tuple[str, tuple[tuple[str, str, bool], ...]]:
+    """Resolve the host sources for the canonical bwrap mount destinations."""
+    workspace_dir, outputs_dir, inputs_dir = resolve_mount_dirs()
+    workspace = str(Path(workspace_dir).expanduser().resolve())
+    outputs = str(Path(outputs_dir).expanduser().resolve())
+    inputs = str(Path(inputs_dir).expanduser().resolve())
+    binds: list[tuple[str, str, bool]] = [(outputs, _DEFAULT_OUTPUTS_DIR, False)]
+    if Path(inputs).is_dir():
+        binds.append((inputs, _DEFAULT_INPUTS_DIR, True))
+    project_dir = os.environ.get("FRONTIER_AGENT_PROJECT_DIR", "").strip()
+    if project_dir and Path(project_dir).is_dir():
+        project = str(Path(project_dir).expanduser().resolve())
+        if project != workspace:
+            binds.append((project, project, False))
+    return workspace, tuple(binds)
+
+
+def _shared_sandbox_identity(backend: str) -> tuple[Any, ...]:
+    """Describe the configuration that a reusable shared sandbox captures."""
+    if backend in ("local", "bwrap"):
+        workspace, binds = _bwrap_mount_config()
+        return ("bwrap", workspace, binds)
+    if backend in ("container", "native"):
+        workspace = str(Path(resolve_mount_dirs()[0]).expanduser().resolve())
+        return (backend, workspace)
+    return (backend,)
+
+
+def _live_shared_sandbox(expected_identity: tuple[Any, ...]) -> Any:
     """Return the shared singleton if it's alive (and refresh its TTL), else
     clear it and return None. Caller must hold or not need the creation lock."""
-    global _sandbox
+    global _sandbox, _sandbox_identity
     if _sandbox is None:
+        return None
+    if _sandbox_identity != expected_identity:
+        with contextlib.suppress(Exception):
+            _sandbox.kill()
+        _sandbox = None
+        _sandbox_identity = None
         return None
     try:
         result = _sandbox.commands.run("echo ok", timeout=5)
@@ -2821,6 +2862,7 @@ def _live_shared_sandbox() -> Any:
     except Exception:
         logger.warning("Sandbox connection lost, creating new one")
         _sandbox = None
+        _sandbox_identity = None
         return None
 
 
@@ -2836,10 +2878,17 @@ def get_sandbox() -> Any:
     if task_sb is not None:
         return task_sb
 
-    global _sandbox
+    global _sandbox, _sandbox_identity
+
+    backend = _get_sandbox_backend()
+    expected_identity = _shared_sandbox_identity(backend)
 
     # Fast path: reuse the live shared singleton without taking the lock.
-    live = _live_shared_sandbox()
+    live = (
+        _live_shared_sandbox(expected_identity)
+        if _sandbox_identity == expected_identity
+        else None
+    )
     if live is not None:
         return live
 
@@ -2847,11 +2896,12 @@ def get_sandbox() -> Any:
     # ONE sandbox instead of each spinning up (and leaking) its own.
     with _sandbox_lock:
         # Double-check — another thread may have created it while we waited.
-        live = _live_shared_sandbox()
+        backend = _get_sandbox_backend()
+        expected_identity = _shared_sandbox_identity(backend)
+        live = _live_shared_sandbox(expected_identity)
         if live is not None:
             return live
 
-        backend = _get_sandbox_backend()
         # Container filesystem mode: attach the shared mounts; CurrentSandbox
         # drops model commands to the unprivileged tool uid.
         # The node normally sets this explicitly per task.
@@ -2859,6 +2909,17 @@ def get_sandbox() -> Any:
             workspace_dir = resolve_mount_dirs()[0]
             Path(workspace_dir).mkdir(parents=True, exist_ok=True)
             _sandbox = CurrentSandbox(workspace_dir)
+            _sandbox_identity = expected_identity
+            return _sandbox
+        if backend in ("local", "bwrap"):
+            workspace_dir, binds = _bwrap_mount_config()
+            Path(workspace_dir).mkdir(parents=True, exist_ok=True)
+            _sandbox = _create_provisioned_sandbox(
+                use_e2b=False,
+                workspace=workspace_dir,
+                binds=binds,
+            )
+            _sandbox_identity = expected_identity
             return _sandbox
         use_e2b, api_key, template, timeout = _resolve_use_e2b()
         try:
@@ -2868,6 +2929,7 @@ def get_sandbox() -> Any:
                 template=template,
                 timeout=timeout,
             )
+            _sandbox_identity = expected_identity
         except Exception as exc:
             # ``auto`` is the availability-oriented policy: E2B first, then a
             # real Linux bubblewrap sandbox. Explicit ``e2b`` remains strict so
@@ -2879,6 +2941,7 @@ def get_sandbox() -> Any:
                 )
                 try:
                     _sandbox = _create_provisioned_sandbox(use_e2b=False)
+                    _sandbox_identity = expected_identity
                 except Exception as bwrap_exc:
                     raise SandboxUnavailableError(
                         "E2B sandbox creation failed and the Linux bubblewrap "
@@ -2908,7 +2971,7 @@ def current_local_workspace() -> str:
 
 def close_sandbox() -> None:
     """Close the shared sandbox. Called on application shutdown."""
-    global _sandbox
+    global _sandbox, _sandbox_identity
     if _sandbox is not None:
         _close_e2b_meter_span(_sandbox)
         try:
@@ -2917,6 +2980,7 @@ def close_sandbox() -> None:
         except Exception as e:
             logger.warning("Error closing sandbox: %s", e)
         _sandbox = None
+    _sandbox_identity = None
 
 
 def get_existing_sandbox() -> Any:
