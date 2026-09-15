@@ -2449,6 +2449,12 @@ def resolve_runtime_path(path: str) -> str:
     if not path or not os.path.isabs(path):
         return path
     normalized = os.path.normpath(path)
+    # A bwrap command sees the canonical mount namespace. Host-physical
+    # session paths may still be exported for the TUI and evidence display,
+    # but substituting them here creates look-alike directories in bwrap's
+    # ephemeral root instead of writing through the real mounts.
+    if _get_sandbox_backend() in ("bwrap", "local"):
+        return normalized
     workspace, outputs, inputs = resolve_mount_dirs()
     for alias, root in (
         (_DEFAULT_WORKSPACE_DIR, workspace),

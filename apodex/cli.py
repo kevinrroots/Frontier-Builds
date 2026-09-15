@@ -413,6 +413,10 @@ async def _amain(argv: list[str] | None = None) -> int:
         except SandboxUnavailable as exc:
             print(f"apodex: {exc}", file=sys.stderr)
             return 2
+        # Keep the tool layer on the same explicit boundary selected by the
+        # CLI. Otherwise it independently resolves a backend and may rewrite
+        # canonical bwrap paths onto host-physical session paths.
+        os.environ["SANDBOX_BACKEND"] = BWRAP
     elif args.no_sandbox:
         strategy = Strategy(HOST, "--no-sandbox")
     else:

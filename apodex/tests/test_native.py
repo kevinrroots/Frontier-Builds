@@ -116,6 +116,28 @@ def test_native_runtime_resolves_canonical_mount_aliases(
     )
 
 
+def test_bwrap_runtime_keeps_canonical_mount_aliases(
+    tmp_path, monkeypatch,
+) -> None:
+    """Host session paths must not replace names inside the bwrap jail."""
+    workspace = tmp_path / "physical-workspace"
+    outputs = tmp_path / "physical-outputs"
+    inputs = tmp_path / "physical-inputs"
+    for path in (workspace, outputs, inputs):
+        path.mkdir()
+    monkeypatch.setenv("SANDBOX_BACKEND", "bwrap")
+    monkeypatch.setenv("FRONTIER_AGENT_WORKSPACE_DIR", str(workspace))
+    monkeypatch.setenv("FRONTIER_AGENT_OUTPUTS_DIR", str(outputs))
+    monkeypatch.setenv("FRONTIER_AGENT_INPUTS_DIR", str(inputs))
+
+    assert resolve_runtime_path("/workspace/a.txt") == "/workspace/a.txt"
+    assert resolve_runtime_path("/outputs/report.txt") == "/outputs/report.txt"
+    assert resolve_runtime_path("/inputs/source.txt") == "/inputs/source.txt"
+    assert resolve_runtime_path("/outputs-old/report.txt") == (
+        "/outputs-old/report.txt"
+    )
+
+
 def test_read_file_splits_an_image_batch_but_not_a_comma_in_a_filename(
     tmp_path, monkeypatch,
 ) -> None:
