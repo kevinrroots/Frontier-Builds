@@ -289,6 +289,12 @@ def test_linux_uses_native_runtime_by_default(
 def test_linux_bwrap_is_explicit_and_skips_native_runtime(
     tmp_path, monkeypatch,
 ) -> None:
+    # Restore process-wide sandbox state after this in-process CLI test.
+    import apodex.sandbox as sandbox_state
+
+    monkeypatch.setattr(sandbox_state, "_active", sandbox_state._active)
+    monkeypatch.setenv("SANDBOX_BACKEND", "auto")
+
     prepared: list[tuple[str, str]] = []
     requested: list[str | None] = []
     monkeypatch.chdir(tmp_path)
