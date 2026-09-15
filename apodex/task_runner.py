@@ -300,8 +300,13 @@ class TaskRunnerMixin:
             journal=self.journal, plan_state=self.plan_state, steer_inbox=inbox,
             rules=self.rules,
         )
-        observers = [observer, UsageObserver(self.usage, tools=tools), self.tracer,
-                     *profile.extra_observers(tool_names)]
+        observers = [
+            observer,
+            UsageObserver(self.usage, tools=tools),
+            self.tracer,
+            *getattr(self, "managed_observers", []),
+            *profile.extra_observers(tool_names),
+        ]
         config = LoopConfig(
             max_turns=self.max_turns,
             role_id=f"{self.mode}_agent",
@@ -497,7 +502,12 @@ class TaskRunnerMixin:
                 self.max_turns,
             ),
             "coding_workspace_root": self.cwd,
-            "sdk_extra_observers": [observer, usage_observer, self.tracer],
+            "sdk_extra_observers": [
+                observer,
+                usage_observer,
+                self.tracer,
+                *getattr(self, "managed_observers", []),
+            ],
             # Stable across workflow executions; ``turn_index`` advances
             # within it. Workflows use this for upstream LLM session affinity.
             "session_id": self.session_id,

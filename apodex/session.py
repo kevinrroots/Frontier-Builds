@@ -130,6 +130,7 @@ class TerminalSession(TaskRunnerMixin):
         # steered lines from its input box. See apodex/tui/.
         self.tui_mode = False
         self._inbox: Any = None  # current run's SteerInbox, exposed for the TUI
+        self.managed_observers: list[Any] = []
         from apodex.config import UserSettings
         self.user_settings = UserSettings.load()
         eff_auto_approve = auto_approve or self.user_settings.auto_approve

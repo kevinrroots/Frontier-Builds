@@ -127,6 +127,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--resume", nargs="?", const="", default=None, metavar="SESSION_ID",
         help="resume a session by id; without an id, list saved sessions",
     )
+    p.add_argument(
+        "--managed-request", default=None, metavar="PATH",
+        help=argparse.SUPPRESS,
+    )
     p.add_argument("--model", default=None, help="model id (defaults to $OPENAI_MODEL / $APODEX_MODEL)")
     p.add_argument("--cwd", default=None, help="working directory the agent operates in (default: current)")
     p.add_argument(
@@ -279,6 +283,16 @@ def _safe_write_history(readline: object, path: str) -> None:
 
 async def _amain(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.managed_request and (
+        args.task is not None or args.yes or args.plan or args.input or args.resume is not None
+    ):
+        print(
+            "error: --managed-request is an isolated machine interface and cannot "
+            "be combined with TASK, --resume, --input, --plan, or --yes",
+            file=sys.stderr,
+        )
+        return 2
 
     # ``--resume`` on its own is deliberately a local, read-only operation:
     # it should work even when no model credentials or sandbox are available.
@@ -540,6 +554,16 @@ async def _amain(argv: list[str] | None = None) -> int:
     for warning in runtime_config.warnings:
         print(f"warning: {warning.message}", file=sys.stderr)
 
+    if args.managed_request:
+        from apodex.managed import run_managed_request
+
+        return await run_managed_request(
+            args.managed_request,
+            cfg=cfg,
+            max_turns=max_turns,
+            mode=mode,
+        )
+
     session = TerminalSession(
         cfg=cfg,
         cwd=cwd,
@@ -602,10 +626,32 @@ async def _amain(argv: list[str] | None = None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    effective_argv = list(argv if argv is not None else sys.argv[1:])
+    managed_path = ""
+    for index, arg in enumerate(effective_argv):
+        if arg.startswith("--managed-request="):
+            managed_path = arg.split("=", 1)[1]
+        elif arg == "--managed-request" and index + 1 < len(effective_argv):
+            managed_path = effective_argv[index + 1]
     try:
-        return asyncio.run(_amain(argv))
+        result = asyncio.run(_amain(argv))
     except KeyboardInterrupt:
-        return 130
+        result = 130
+    except Exception:
+        if managed_path:
+            from apodex.managed import mark_managed_cli_failure
+
+            mark_managed_cli_failure(
+                managed_path, "FRONTIER_MANAGED_CLI_UNHANDLED_EXCEPTION"
+            )
+        raise
+    if result != 0 and managed_path:
+        from apodex.managed import mark_managed_cli_failure
+
+        mark_managed_cli_failure(
+            managed_path, f"FRONTIER_MANAGED_CLI_EXIT_{result}"
+        )
+    return result
 
 
 if __name__ == "__main__":
