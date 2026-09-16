@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from apodex.managed import (
     ManagedBudgetObserver,
     ManagedState,
     _digest,
+    _load_managed_resume_prompt,
     load_managed_request,
     mark_managed_cli_failure,
 )
@@ -160,3 +162,54 @@ def test_managed_cli_exit_preserves_resumable_interrupted_state(
     assert json.loads(
         (path.parent / "status.json").read_text(encoding="utf-8")
     ) == status
+
+
+def test_managed_resume_reloads_digest_bound_original_prompt(
+    tmp_path, monkeypatch
+):
+    original_payload, original_path = _request(
+        tmp_path, session_id="managed-resume-session"
+    )
+    _, resume_path = _request(
+        tmp_path,
+        operation_id="op-resume",
+        action="resume",
+        session_id="managed-resume-session",
+        launch_index=2,
+    )
+    monkeypatch.setenv("APODEX_MANAGED_ROOT", str(tmp_path))
+    resume_request, _ = load_managed_request(str(resume_path))
+    session = SimpleNamespace(
+        _managed_resume_request_path=str(original_path)
+    )
+    assert (
+        _load_managed_resume_prompt(session, resume_request)
+        == f"{original_payload['task_summary']}\n\n"
+        f"Acceptance criteria:\n{original_payload['acceptance_criteria']}"
+    )
+
+
+def test_managed_resume_rejects_missing_or_mismatched_source(
+    tmp_path, monkeypatch
+):
+    _, original_path = _request(
+        tmp_path, session_id="different-session"
+    )
+    _, resume_path = _request(
+        tmp_path,
+        operation_id="op-resume",
+        action="resume",
+        session_id="managed-resume-session",
+        launch_index=2,
+    )
+    monkeypatch.setenv("APODEX_MANAGED_ROOT", str(tmp_path))
+    resume_request, _ = load_managed_request(str(resume_path))
+    with pytest.raises(FileNotFoundError):
+        _load_managed_resume_prompt(SimpleNamespace(), resume_request)
+    with pytest.raises(ValueError, match="binding mismatch"):
+        _load_managed_resume_prompt(
+            SimpleNamespace(
+                _managed_resume_request_path=str(original_path)
+            ),
+            resume_request,
+        )

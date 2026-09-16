@@ -620,6 +620,11 @@ class TerminalSession(TaskRunnerMixin):
                     "history": list(self.history),
                     "display_history": list(self.display_history),
                     "workflow_turns": list(self.workflow_turns),
+                    # Managed resume stores no task plaintext here. It keeps only
+                    # the path of the original digest-bound managed request.
+                    "managed_resume_request_path": str(
+                        getattr(self, "_managed_resume_request_path", "") or ""
+                    ),
                     "usage": self.usage.to_dict(),
                     "tui": dict(self.tui_state),
                     "outputs": {
@@ -668,6 +673,9 @@ class TerminalSession(TaskRunnerMixin):
             self.workflow_turns = list(state.get("workflow_turns") or [])
         except Exception:
             self.workflow_turns = []
+        self._managed_resume_request_path = str(
+            state.get("managed_resume_request_path") or ""
+        )
         self.usage.restore(state.get("usage"))
         raw_tui_state = state.get("tui") or {}
         self.tui_state = dict(raw_tui_state) if isinstance(raw_tui_state, dict) else {}

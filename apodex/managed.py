@@ -403,6 +403,19 @@ def _write_final(state: ManagedState, text: str) -> tuple[str, int]:
     return str(result["sha256"]), int(result["bytes"])
 
 
+def _load_managed_resume_prompt(session: object, request: ManagedRequest) -> str:
+    """Reload the original task only from its digest-bound managed request."""
+    path_value = str(
+        getattr(session, "_managed_resume_request_path", "") or ""
+    ).strip()
+    if not path_value:
+        raise FileNotFoundError("managed resume source is not checkpointed")
+    source, _ = load_managed_request(path_value)
+    if source.action != "submit" or source.session_id != request.session_id:
+        raise ValueError("managed resume source binding mismatch")
+    return source.prompt
+
+
 async def run_managed_request(
     path_value: str,
     *,
@@ -442,7 +455,10 @@ async def run_managed_request(
     session.rules = None
     budget = ManagedBudgetObserver(state, request.token_limit)
     session.managed_observers = [budget]
-    if request.action == "resume":
+    prompt = request.prompt
+    if request.action == "submit":
+        session._managed_resume_request_path = str(request_path)
+    else:
         restored = load_session_state(request.session_id)
         if restored is None:
             state.write("failed", error_code="FRONTIER_RESUME_STATE_MISSING")
@@ -454,6 +470,18 @@ async def run_managed_request(
                 "failed",
                 error_code="FRONTIER_MANAGED_TOKEN_BUDGET_EXHAUSTED",
                 token_usage=session.usage.total,
+            )
+            return 1
+        try:
+            prompt = _load_managed_resume_prompt(session, request)
+        except FileNotFoundError:
+            state.write(
+                "failed", error_code="FRONTIER_RESUME_CHECKPOINT_NOT_READY"
+            )
+            return 1
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            state.write(
+                "failed", error_code="FRONTIER_RESUME_SOURCE_INVALID"
             )
             return 1
 
@@ -469,7 +497,6 @@ async def run_managed_request(
     state.write("running", worker_pid=os.getpid())
     try:
         remaining = max(0.1, deadline - time.monotonic())
-        prompt = request.prompt if request.action == "submit" else ""
         await asyncio.wait_for(session.run_task(prompt), timeout=remaining)
     except TimeoutError:
         session._persist()
@@ -518,6 +545,9 @@ async def run_managed_request(
         details["error_sha256"] = hashlib.sha256(renderer.failure_text.encode()).hexdigest()
     if approver.last_outcome:
         details["approval_outcome"] = approver.last_outcome
+    if terminal == "completed":
+        session._managed_resume_request_path = ""
+    session._persist()
     state.write(terminal, **details)
     return 0 if terminal == "completed" else 1
 
