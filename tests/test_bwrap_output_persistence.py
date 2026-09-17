@@ -274,3 +274,63 @@ def test_bash_persists_through_explicit_cli_bwrap(
     assert approved.read_text(encoding="utf-8") == (
         "BASH_BWRAP_OUTPUT_PERSISTENCE_SENTINEL"
     )
+
+
+def test_stateful_react_bwrap_prefers_active_session_outputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+
+    from apodex.run_layout import activate_run
+    from apodex.session import TerminalSession
+    from workflows.stateful_react_agent.nodes.main_agent import (
+        _resolve_sandbox_binds,
+    )
+
+    project = tmp_path / "project"
+    workflow_root = tmp_path / "workflow" / "workspace"
+    project.mkdir()
+    workflow_root.mkdir(parents=True)
+
+    for name in (
+        "APODEX_PINNED_MOUNTS",
+        "APODEX_RUNS_ROOT_PINNED",
+        "APODEX_OUTPUTS_LINK",
+        "APODEX_HOST_RUNS_ROOT",
+        "APODEX_HOST_OUTPUTS_ROOT",
+        "APODEX_HOST_OUTPUTS_DIR",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("APODEX_SESSION_ID", "cp09-pretest-session")
+    monkeypatch.setenv("APODEX_RUN_DIR", str(tmp_path / "pretest-run"))
+    monkeypatch.setenv(
+        "FRONTIER_AGENT_OUTPUTS_DIR", str(tmp_path / "pretest-outputs"),
+    )
+    monkeypatch.setenv("APODEX_RUNS_ROOT", str(tmp_path / "caller-runs"))
+    monkeypatch.setenv(
+        "APODEX_SESSION_OUTPUTS_ROOT", str(tmp_path / "session-outputs"),
+    )
+
+    session_id = "cp09-react-output-bind"
+    activate_run(session_id, str(project))
+    TerminalSession._activate_session_outputs(session_id, str(project))
+    active_outputs = Path(os.environ["FRONTIER_AGENT_OUTPUTS_DIR"]).resolve()
+    legacy_outputs = workflow_root.parent / "outputs"
+
+    assert active_outputs != legacy_outputs
+    coding_state = {"metadata": {"coding_workspace_root": str(project)}}
+    binds, outputs_dir = _resolve_sandbox_binds(coding_state, workflow_root)
+    assert outputs_dir == active_outputs
+    assert (str(active_outputs), "/outputs", False) in binds
+    assert (str(legacy_outputs), "/outputs", False) not in binds
+
+    benchmark_binds, benchmark_outputs = _resolve_sandbox_binds({}, workflow_root)
+    assert benchmark_outputs == legacy_outputs
+    assert (str(legacy_outputs), "/outputs", False) in benchmark_binds
+
+    monkeypatch.delenv("FRONTIER_AGENT_OUTPUTS_DIR")
+    fallback_binds, fallback_outputs = _resolve_sandbox_binds(
+        coding_state, workflow_root,
+    )
+    assert fallback_outputs == legacy_outputs
+    assert (str(legacy_outputs), "/outputs", False) in fallback_binds

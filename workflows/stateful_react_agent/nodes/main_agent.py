@@ -434,7 +434,16 @@ def _resolve_sandbox_binds(
 ) -> tuple[tuple[tuple[str, str, bool], ...], Path]:
     """Resolve benchmark-provided ``/inputs`` and shared ``/outputs`` mounts."""
     metadata = state.get("metadata") or {}
-    outputs_dir = worktree_root.parent / "outputs"
+    configured_outputs = (
+        os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "").strip()
+        if str(metadata.get("coding_workspace_root") or "").strip()
+        else ""
+    )
+    outputs_dir = (
+        Path(configured_outputs).expanduser().resolve()
+        if configured_outputs
+        else worktree_root.parent / "outputs"
+    )
 
     binds: list[tuple[str, str, bool]] = []
     dataset_root = str(metadata.get("_dataset_root") or "")
