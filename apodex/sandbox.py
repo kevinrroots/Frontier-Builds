@@ -219,21 +219,62 @@ def set_active_strategy(strategy: Strategy) -> None:
 # ── execution ────────────────────────────────────────────────────────────
 
 _bwrap_sandbox = None  # one jail per process; commands are cheap, setup is not
+_bwrap_sandbox_identity: tuple[Any, ...] | None = None
+
+
+def _bash_bwrap_mount_config(
+    cwd: str,
+) -> tuple[str, tuple[tuple[str, str, bool], ...]]:
+    """Resolve the Bash jail's host paths and canonical persistent mounts."""
+    real = str(Path(cwd).expanduser().resolve())
+    binds: list[tuple[str, str, bool]] = [(real, real, False)]
+
+    outputs_value = os.environ.get("FRONTIER_AGENT_OUTPUTS_DIR", "").strip()
+    if outputs_value:
+        outputs = str(Path(outputs_value).expanduser().resolve())
+        binds.append((outputs, "/outputs", False))
+
+    inputs_value = os.environ.get("FRONTIER_AGENT_INPUTS_DIR", "").strip()
+    if inputs_value:
+        inputs_path = Path(inputs_value).expanduser().resolve()
+        if inputs_path.is_dir():
+            binds.append((str(inputs_path), "/inputs", True))
+
+    return real, tuple(binds)
 
 
 def _get_bwrap_sandbox(cwd: str) -> Any:
-    """A ``BwrapSandbox`` whose jail exposes *cwd* at its own absolute path.
+    """Return the Bash jail with the active session's persistent mounts.
 
-    ``workspace=`` binds a directory at ``/workspace`` and runs there, but a
-    local repository has to keep its real path for the model's paths to mean
-    anything, so *cwd* is bound a second time at itself and each command cds
-    into it.
+    ``workspace=`` binds *cwd* at ``/workspace``. Binding it again at its real
+    absolute path keeps model-visible paths and tracebacks stable. The session
+    output and input directories must also be mounted at their canonical paths;
+    otherwise a successful Bash write to ``/outputs`` lands in the private
+    directory created by :class:`BwrapSandbox` and disappears after the jail.
+
+    Session aliases can be retargeted without changing their environment string,
+    so the identity uses resolved host paths and replaces a stale cached jail.
     """
-    global _bwrap_sandbox
+    global _bwrap_sandbox, _bwrap_sandbox_identity
+
+    from plugins.tools._sandbox import BwrapSandbox
+
+    real, binds = _bash_bwrap_mount_config(cwd)
+    expected_identity = (real, binds)
+    if (
+        _bwrap_sandbox is not None
+        and _bwrap_sandbox_identity != expected_identity
+    ):
+        try:
+            _bwrap_sandbox.kill()
+        except Exception:
+            logger.warning("Failed to close stale Bash bwrap sandbox", exc_info=True)
+        _bwrap_sandbox = None
+        _bwrap_sandbox_identity = None
+
     if _bwrap_sandbox is None:
-        from plugins.tools._sandbox import BwrapSandbox
-        real = str(Path(cwd).expanduser().resolve())
-        _bwrap_sandbox = BwrapSandbox(workspace=real, binds=((real, real, False),))
+        _bwrap_sandbox = BwrapSandbox(workspace=real, binds=binds)
+        _bwrap_sandbox_identity = expected_identity
     return _bwrap_sandbox
 
 
