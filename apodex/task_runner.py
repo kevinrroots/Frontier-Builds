@@ -3,6 +3,7 @@ import os
 import re
 from typing import TYPE_CHECKING, Any
 
+from apodex.engineering_memory import retrieve_engineering_context
 from apodex.observers import TerminalObserver
 from apodex.profiles import get_profile
 from frontier_agent.core.errors import LLMError
@@ -523,6 +524,9 @@ class TaskRunnerMixin:
             inbox.attach()       # start watching stdin (no-op without a TTY)
         self.approver.inbox = inbox
         current_query = self._enrich_task(task)
+        engineering_context = retrieve_engineering_context(current_query)
+        if engineering_context:
+            metadata["_sys_prompt_addendum"] = engineering_context
         compaction = await SessionHistoryCompactor(
             summary_llm=self.llm,
             config=SessionCompactionConfig(
