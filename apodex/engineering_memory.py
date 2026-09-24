@@ -24,7 +24,7 @@ RERANK_URL = "http://127.0.0.1:18121/v1/rerank"
 ENGINEERING_REGISTRY = Path(
     os.getenv(
         "KEVIN_FRONTIER_ENGINEERING_MEMORY_REGISTRY",
-        "/home/krrd/.config/kevin-agentos/memory/postgresql-v2/engineering/registry.json",
+        "/home/krr/.config/kevin-agentos/memory/postgresql-v2/engineering/registry.json",
     )
 )
 EMBEDDING_MODEL_ALIAS = "Qwen3-Embedding-0.6B-Q8_0.gguf"
